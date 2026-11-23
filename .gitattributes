@@ -1,0 +1,13 @@
+# 统一行尾，避免 clone 后脚本跑不起来
+* text=auto
+
+# EDK2 UEFI Shell 脚本：必须 CRLF
+*.nsh text eol=crlf
+# Windows 批处理：必须 CRLF（且为 GBK 编码，git 不改编码）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.txt text eol=crlf
+
+# 文档与代码：LF
+*.md  text eol=lf
+*.py  text eol=lf

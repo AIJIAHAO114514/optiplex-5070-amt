@@ -1,0 +1,19 @@
+# 固件与工具二进制：不随仓库分发
+*.bin
+*.exe
+*.efi
+*.rom
+*.rar
+*.7z
+*.zip
+
+# 运行时产物
+logs/
+*.log
+__pycache__/
+*.pyc
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store

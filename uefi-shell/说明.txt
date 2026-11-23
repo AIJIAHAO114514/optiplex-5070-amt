@@ -1,0 +1,62 @@
+UEFI Shell 备用方案（不依赖任何驱动）
+=====================================
+
+为什么 Ventoy 直接引导 fpt.efi 会失败
+-------------------------------------
+fpt.efi 是 UEFI Shell 下的命令行程序，不是启动项。Ventoy 把它当 OS loader
+拉起来，它拿不到 shell 环境，就黑屏或秒退。
+另外 Ventoy 数据分区是 exFAT，UEFI Shell 只带 FAT 驱动，看不到里面的文件。
+=> 这套东西必须放在 FAT32 分区上，并且必须先有 Shell 再跑 fpt.efi。
+
+目录结构（全部放在 FAT32 分区根目录）
+------------------------------------
+    \EFI\BOOT\BOOTX64.EFI    Shell.efi，BIOS 认这个路径就能直接起
+    \Shell.efi                同一个文件，Ventoy 菜单里也能选
+    \fpt.efi
+    \startup.nsh              进 Shell 自动执行，打印分区表
+    \dump.nsh                 一键导出 full.bin + me.bin
+    \write.nsh                一键写 me_amt.bin
+
+【最常见的卡点】提示符是 "Shell>" 而不是 "fs0:\>"
+--------------------------------------------------
+"Shell>" 表示当前目录没设置。这时 dir / ls 会报
+    Current directory not specified
+dump.nsh 也会找不到 fpt.efi。先按下面做：
+
+    map                列出所有文件系统
+    fs0:               逐个试，直到 dir 能列出 fpt.efi
+    dir
+    fs1:
+    dir
+    ...
+    dump.nsh           找到正确的 fs 之后再跑
+
+也可以一条命令直接干（N 换成实际的那个号）：
+    fsN://fpt.efi -d fsN://full.bin
+    fsN://fpt.efi -me -d fsN://me.bin
+
+在 5070 上实测的分区布局（fpt.efi -i 输出，可拿来对照）
+-------------------------------------------------------
+    DESC   - Base: 0x00000000, Limit: 0x00000FFF
+    GbE    - Base: 0x00001000, Limit: 0x00002FFF
+    CSME   - Base: 0x00003000, Limit: 0x00FFFFFF    约 16MB
+    BIOS   - Base: 0x01000000, Limit: 0x01FFFFFF    16MB
+    PDR / EC : NOT PRESENT
+    Total Accessible SPI Memory: 32768KB = Total Installed SPI Memory
+
+所以：ME 区不是 5MB，而是 0xFFD000 字节（约 15.98MB）。
+me_amt.bin 也应该是这个长度；脚本一律按本机描述符实测值比对，不写死。
+
+【空间要求】别在容量吃紧的分区上 dump
+-------------------------------------
+full.bin 32MB + me.bin 约 16MB，加上临时开销，目标分区至少留 100MB 空余。
+Ventoy 的 VTOYEFI 分区只有 32MB，放不下 full.bin——如果 dump 到那里，
+FPT 会写失败或写出一个残文件，看起来就是"读不到完整的"。
+
+两条路的取舍
+------------
+- PE + fptw64：有脚本包装，但 PE 可能缺驱动或读不全
+- Shell + fpt.efi：不需要驱动，能直接看到分区表，但命令要手敲
+
+Shell 里没有 hash 工具，回读校验回桌面用 02 / 04 做。
+写完记得断电、取下服务模式跳线，否则 MEBx 永远不出现。
