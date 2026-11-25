@@ -310,25 +310,28 @@ HD Audio 电压、时钟输出开关……丢了就只能靠猜。
 
 ### 6.2 注意：换 ME 文件会把整棵配置树重置
 
-**换之前**，ME 节点下面只有版本号，没有任何可配置子节点：
+先澄清一个容易搞错的地方：**从 `full.bin` 导入时，左边的树本来就是完整的。**
 
-![](https://cyberbus.net/pictrs/image/b82ed4fc-268f-4290-9d05-a9453e8e2071.avif)
+`Intel (R) ME Kernel`、`Intel (R) AMT`、`Platform Protection`、`Integrated Clock Controller`、
+`Flex I/O`、`GPIO` —— 这些节点在换 RGN **之前**就都在，`ME Binary File` 指向原厂那块 ME，
+ME 版本显示 `12.0.97.3000`。
 
-*换之前：只有版本号，没有配置树。*
+FIT 底部的日志也能确认这一点——每换一次 ME 文件，它就把 `full.bin` 重新加载一遍：
 
-**换之后**，树里立刻冒出一整排配置节点：
+```
+Loading D:\...\full.bin
+Decomposed SVU Value: "Intel(R) Cannonlake H Series Chipset - CNP-H No Emulation"
+FIT version used to build the image: 12.0.33.1422
+Writing map file D:\...\full.map
+```
 
-![](https://cyberbus.net/pictrs/image/41f9f0b5-5af1-407c-a50f-7a91379842c4.avif)
+换 RGN 之后，树**看起来没有任何变化**——节点还是那些，能展开的还是能展开。
 
-*换之后：ME Kernel / AMT / Platform Protection / Flex I/O 全部出现。*
+**这恰恰是它危险的地方。** 树看着是好的，你不会去怀疑；但里面的值已经被整棵换成
+RGN 的默认配置了。
 
-**很多人把这当成"换区成功"的标志。它是，但只是个副作用。**
-
-真相是：FIT 读的是 ME 文件里自带的那套配置，**整棵替换掉了从 `full.bin` 继承的配置**。
-树之所以从"只有版本号"变成"满满一棵"，是因为 Dell 出厂那块 ME 是"已初始化、配置已定稿"的，
-FIT 只读出版本号；而 RGN 是"未配置、配置树完整"，FIT 把它全读了出来。
-
-代价是：**Dell 在这台机器上的定制配置，一项都不剩了。**
+FIT 读的是 ME 文件里自带的那套配置，**整棵替换掉**从 `full.bin` 继承的配置。
+Dell 在这台机器上的定制，一项都不剩。
 
 同一台机器逐项对比（原厂快照 vs 换 RGN 后的产物），**426 项里有 35 项被改**：
 
@@ -344,11 +347,13 @@ FIT 只读出版本号；而 RGN 是"未配置、配置树完整"，FIT 把它�
 | `NvarPostManUnLckd` | No | Yes | 生产后 NVAR 可改，安全变松 |
 | `DbgOverridePreProdSi` | `0x0` | `0x8` | 调试位被置位 |
 
-> **一句话：树变满是"RGN 被读进去了"，不是"产物能用了"。**
-> 正确做法是拿 §5.4 那份快照逐项对照，或者直接用 §6.6 的 XML 修复法。
+**怎么判断换没换成功**：看 `Intel (R) ME Kernel` 下面的版本号。
+从 `12.0.97.3000` 变成 `12.0.68.1606` 就是换上了。
 
-只看到版本号变了、树没变，说明 `ME Binary File` 没换成功——最常见的原因是中途点过
-`File → Open`，它被重置回 `full.bin` 了。
+节点数量、树的结构都不会告诉你任何事——它们前后一模一样。
+
+> **一句话：树看着正常，不代表配置是对的。**
+> 正确做法是拿 §5.4 那份快照逐项对照，或者直接用 §6.6 的 XML 修复法。
 
 ### 6.3 关键认知：AMT 不需要你手动开
 
