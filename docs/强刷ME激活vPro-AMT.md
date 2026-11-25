@@ -287,6 +287,16 @@ FPT Operation Successful.
 
 这一步能抓出"dump 看着有 32MB、其实是残的"这类隐蔽问题。两个来源对得上，才说明这次 dump 是干净的。
 
+### 5.4 顺手存一份配置快照
+
+FIT 打开 `full.bin` 之后，`File → Save As`，存一份 XML（比如 `full-config.xml`）。
+
+**这一步不要省。** 下一步换 ME 区时，FIT 会把整棵配置树替换掉（§6.2 会讲），
+到时候你唯一的对照基准就是这份快照。
+
+里面记着 Dell 在这台机器上的全部 426 项配置：AMT 关闭、PTT 开启、SATA/PCIe 复用方式、
+HD Audio 电压、时钟输出开关……丢了就只能靠猜。
+
 ---
 
 ## 6. 第二步：FIT 里换 RGN（核心步骤）
@@ -298,23 +308,47 @@ FPT Operation Successful.
 3. 左树点 `Ifwi: Intel(R) ME and Pmc Region` → 右侧属性表找 **`ME Binary File`** → 双击值 → 浏览 → 选干净的 RGN：
    `12.0.68.1606_COR_H_BA_PRD_RGN.bin`
 
-### 6.2 怎么算成功：只看左边树
+### 6.2 注意：换 ME 文件会把整棵配置树重置
 
 **换之前**，ME 节点下面只有版本号，没有任何可配置子节点：
 
 ![](https://cyberbus.net/pictrs/image/b82ed4fc-268f-4290-9d05-a9453e8e2071.avif)
 
-*换 RGN 之前：只有版本号，没有配置树。*
+*换之前：只有版本号，没有配置树。*
 
 **换之后**，树里立刻冒出一整排配置节点：
 
 ![](https://cyberbus.net/pictrs/image/41f9f0b5-5af1-407c-a50f-7a91379842c4.avif)
 
-*换 RGN 之后：ME Kernel / AMT / Platform Protection / Flex I/O 全部出现。*
+*换之后：ME Kernel / AMT / Platform Protection / Flex I/O 全部出现。*
 
-**这是"换区成功"的唯一可靠标志。**
+**很多人把这当成"换区成功"的标志。它是，但只是个副作用。**
 
-只看到版本号变了、树没变，说明没换成功——最常见的原因是中途点过 `File → Open`，`ME Binary File` 被重置回 `full.bin` 了。
+真相是：FIT 读的是 ME 文件里自带的那套配置，**整棵替换掉了从 `full.bin` 继承的配置**。
+树之所以从"只有版本号"变成"满满一棵"，是因为 Dell 出厂那块 ME 是"已初始化、配置已定稿"的，
+FIT 只读出版本号；而 RGN 是"未配置、配置树完整"，FIT 把它全读了出来。
+
+代价是：**Dell 在这台机器上的定制配置，一项都不剩了。**
+
+同一台机器逐项对比（原厂快照 vs 换 RGN 后的产物），**426 项里有 35 项被改**：
+
+| 被改的项 | 原厂 | RGN 默认 | 后果 |
+|---|---|---|---|
+| `PttSupported` | **Yes** | **No** | **fTPM 失效，开机报 `TPM could not be initialized`** |
+| `PttPwrUpState` | Enabled | Disabled | 同上 |
+| `SataPCIeComboPort2` | **SATA** | **PCIe** | 接在这个口的硬盘消失 |
+| `HdaVoltSelect` | **3.3V** | **1.8V** | 声卡供电不对，可能没声音 |
+| `ClkoutSRC0/5/6/7/12/13/14/15` | Disabled | **Enabled** | 8 路时钟输出被凭空打开 |
+| `FwUpdateOemId` | Dell 的 GUID | 全 0 | OEM ID 丢失 |
+| `ProfileChangeable` | true | false | BIOS 里改不了 boot profile |
+| `NvarPostManUnLckd` | No | Yes | 生产后 NVAR 可改，安全变松 |
+| `DbgOverridePreProdSi` | `0x0` | `0x8` | 调试位被置位 |
+
+> **一句话：树变满是"RGN 被读进去了"，不是"产物能用了"。**
+> 正确做法是拿 §5.4 那份快照逐项对照，或者直接用 §6.6 的 XML 修复法。
+
+只看到版本号变了、树没变，说明 `ME Binary File` 没换成功——最常见的原因是中途点过
+`File → Open`，它被重置回 `full.bin` 了。
 
 ### 6.3 关键认知：AMT 不需要你手动开
 
@@ -343,9 +377,21 @@ Corporate H 的树里没有 `Standard Manageability` 这一项——那是低配
 | `Intel (R) AMT` | 6.3 那 6 项 | 核对为 `Yes` / `Enabled`，一般无需改 |
 | KVM 段 | `KVM Redirection Supported` | 默认 **Yes**，远程桌面靠它 |
 | KVM 段 | `Firmware KVM Screen Blanking` | 只影响远程画面是否黑屏，按需 |
-| `Platform Protection` | `Boot Guard Profile Configuration` | **保持默认 `Profile 5 - FVME`，不要改** |
+| **`Intel (R) PTT Configuration`** | `PTT Supported` | **照抄原厂快照**（这台是 Yes） |
+| **`Intel (R) PTT Configuration`** | `initial power-up state` | **照抄**（Enabled） |
+| **`TPM Over SPI Bus Configuration`** | `TPM Over SPI Supported` | **照抄**（这台是 No，用 fTPM，没有独立芯片） |
+| `Platform Protection` | `Boot Guard Profile Configuration` | **保持 `Profile 5 - FVME`，不要改** |
 | Build Settings | `Enable Boot Guard` | **必须 Yes**。改 No 后 BIOS 验签过不去，开不了机 |
 | Build Settings | `Output Path` / `Region Order` / `Signing Tool` | 全部保持默认——这个窗口**不是改 AMT 的地方** |
+| **任何位置** | **带 `[FPF]` 后缀的项** | **一律不动** —— 那是熔丝，烧断不可逆 |
+
+**PTT 这三项为什么必须单独拎出来说**：它俩是 fTPM 的载体，跑在 ME 里。
+
+RGN 的默认值**不等于**你机器出厂时的实际配置。原厂是 `Yes` 而 RGN 给了 `No`，刷完 TPM 就废，
+开机直接报 `TPM could not be initialized`；反过来原厂用独立 TPM 芯片（`No`），
+RGN 给了 `Yes`，ME 会去找一颗不存在的芯片，同样初始化失败。
+
+**判断依据只有一条：打开 §5.4 存的那份快照，照着抄。**
 
 ![](https://cyberbus.net/pictrs/image/c4516c18-bac1-4efb-9e76-3f38662360eb.avif)
 
@@ -367,6 +413,55 @@ Corporate H 的树里没有 `Standard Manageability` 这一项——那是低配
 | TCG 事件 `Boot Guard Measured S-CRTM` | BIOS 区偏移 `0xE970B8` | 这台机器本来就在跑"验证 + 度量" |
 
 FVME 正是这一档。真正会拦开机的是 FVE（验证）那一半，而 BIOS 一个字节都不动，KM/BPM 保持有效。Measured 只往日志里记账，不拦截。
+
+### 6.6 配置对不上怎么办：用 XML 快照修
+
+如果已经换过 RGN，开机发现 TPM 报错、硬盘少了一块、或者没声音——**不必从头再来**，
+也不用在 GUI 里逐个开关去改（35 项，肉眼必漏）。
+
+FIT 的项目文件本身就是一份 XML。做法：
+
+**第一步，改两处**
+
+打开 §5.4 存的那份 `full-config.xml`，用文本编辑器改：
+
+```
+① MeRegionFile  ->  指向你构建出的 ME 代码子分区
+                    例如 ...\outimage\Decomp\ME Sub Partition.bin
+② 6 项 AMT：
+     <AmtSupported value="No"           -> "Yes"
+     <NetServicesSupported value="No"   -> "Yes"
+     <MngAppSupported value="No"        -> "Yes"
+     <MngAppPowerUpState value="Disabled" -> "Enabled"
+     <KvmSupported value="No"           -> "Yes"
+     <AmtIdleTimeout value="0x0001"     -> "0xFFFF"
+```
+
+**其余 420 项一个字不动。** 尤其别碰带 `[FPF]` 的。
+
+**第二步，验证配置有没有被再次重置**
+
+```
+FIT → File → Open → 改好的 XML
+→ 立刻展开 Intel (R) PTT Configuration
+→ 确认 PTT Supported = Yes
+```
+
+**这一步是整个方法的关键动作。** 如果显示 `No`，说明 FIT 又按 `MeRegionFile` 重载了配置，
+XML 这条路走不通，只能退回 GUI 逐项改（对照 6.2 那张表）。
+
+**第三步，Build**
+
+```
+Build → Build Image → 弹 Boot Guard FVME 确认框 → Yes
+→ 02_make_me.bat fit-output → write.nsh
+```
+
+**效果**：这么重建出来的 ME 区，和"错版"的差异只有 **0.09%**（15,877 字节，全是配置），
+代码一个模块没动——这一点可以用 `spi_region.py compare` 验证。
+
+> 本仓库的 [`policy/fixed.xml`](../policy/README.md) 就是这么一份成品（原厂配置 + 6 项 AMT），
+> 可以直接拿来对照。
 
 ---
 
@@ -474,7 +569,10 @@ MEBx 里的顺序：
 
 | 坑 | 现象 | 解法 |
 |---|---|---|
-| 树里没有 AMT 节点 | 只能看到版本号 | `ME Binary File` 没换成功，或中途点过 `File → Open` 被重置 |
+| 树里只有版本号、没有 AMT 节点 | `ME Binary File` 没换成功 | 中途点过 `File → Open` 会被重置回 `full.bin`，重新指向 RGN |
+| **树里冒出满屏配置节点** | **以为成功了，但 TPM / 硬盘 / 声音出问题** | **这是整棵树被重置的信号，不是成功标志**（§6.2）。用 §6.6 的 XML 法修 |
+| **开机报 `TPM could not be initialized`** | **换 ME 时 PTT 被重置成 No，fTPM 失效** | 照 §6.4 改回原厂值重刷，刷完在 BIOS 里 Clear TPM |
+| 开机后没声音 / 硬盘少一块 | `HdaVoltSelect`、`SataPCIeComboPort2` 被 RGN 默认值改掉 | 同上，用 §6.6 恢复原厂配置 |
 | FIT 把 FPT 挪了位置 | 原厂 FPT 在 `0x1000`，构建后变成 `0x634000` | 正常。区头 CSE Layout Table 第一项同步改了，ME 靠表定位 FPT，MEA 也能正常识别 |
 
 ### 运行阶段
@@ -531,6 +629,7 @@ CPU             → 支持 vPro
 - **只写 ME 区**，BIOS / GbE / 描述符不落盘，不会走到"Bad Motherboard"那条路；
 - ME 区写坏时，机器通常还能进 BIOS / Shell（BIOS 由 CPU 执行，与 ME 无关），用 `fpt.efi -f me_before.bin -me` 刷回；
 - 真正不可恢复的情况需要 SPI 编程器（CH341A + SOP8 夹子）——但只要不动描述符和 BIOS，用不到；
+- **换 ME 会让 TPM 密钥全部失效**（fTPM 的数据存在 ME 的 MFS 里）。开了 BitLocker 的机器下次启动会要求 48 位恢复密钥，动手前先备份；
 - 拆机装跳线会影响保修；企业环境请确认合规再操作。
 
 **应急卡（存手机里）：**
