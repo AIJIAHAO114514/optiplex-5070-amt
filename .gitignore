@@ -1,4 +1,4 @@
-# 固件与工具二进制：不随仓库分发
+# 固件与工具二进制：默认不随仓库分发
 *.bin
 *.exe
 *.efi
@@ -6,6 +6,9 @@
 *.rar
 *.7z
 *.zip
+
+# 例外：预置的 ME 区域镜像（见 firmware/README.md）
+!firmware/me_amt.bin
 
 # 运行时产物
 logs/

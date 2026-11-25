@@ -2,65 +2,64 @@
 
 > 用 FPT + FIT 把 Dell OptiPlex 5070 的 CSME 区域换成一版干净的 **RGN**，激活出厂被关掉的 Intel AMT。
 
-一次在真机上跑通并验证的完整记录：原理、操作步骤、每一步的判据、以及真实踩过的坑。
-
----
-
-## 为什么出厂没有 AMT
-
-拆开机器看到 Q370，很多人会觉得"这台应该支持 vPro"。**它确实支持，只是被关掉了。** 分三层看：
-
-**1｜硬件和固件都够**
-AMT 需要三样东西同时成立：Q 系列芯片组、支持 vPro 的 CPU、Corporate（COR）版 ME 固件。5070 用的就是 COR 固件（实测 `SKU: Corporate H`），不是"固件缺这一块功能"。
-
-**2｜Dell 在 ME 里关掉了 AMT，而且已经"定稿"**
-出厂 ME 区在构建时 AMT 就是关闭状态；机器首次上电又完成了一次数据初始化，`File System State = Initialized`。配置写进 MFS 之后，FIT 打开它连配置树都不展开，改也改不进去——这才是"升级 ME、改 BIOS 都没用"的根因。
-
-**3｜入口被藏起来了**
-`Manageability` 菜单按 ME 上报的能力动态显示。ME 不报 AMT，F2 里要么没有这一项，要么显示为不可用，看起来就像"不支持"。
-
-> 也有**真的不支持**的情况：非 vPro 的 CPU（i3、i5-9400 一类）。判断标准就两条——**CPU 是否 vPro、ME 是否 COR**。
-
----
-
-## 结果
+一次在真机上跑通并验证的完整记录：原理、操作步骤、每一步的判据，以及两个花了很久才搞明白的坑。
 
 | 项 | 值 |
 |---|---|
 | 环境 | OptiPlex 5070 MT / Q370 / BIOS 1.35.0 / CSME 12.0（Corporate H） |
 | ME 固件 | `12.0.97.3000 · Initialized` → `12.0.68.1606 · Configured` |
-| 写入文件 | `me_amt.bin`，16,764,928 B（`0xFFD000`） |
-| 回读校验 | 与写入文件**逐字节一致** |
-| 结果 | F2 出现 Manageability，`Ctrl+P` 可进 MEBx，AMT 可配置 |
+| 写入校验 | 回读哈希与写入文件逐字节一致 |
+| 结果 | F2 出现 Manageability，`Ctrl+P` 进 MEBx，AMT 可配置 |
 
 ---
 
-## 文档
+## 先看这条：换 ME 会重置整棵配置树
 
-| 文件 | 内容 |
-|---|---|
-| [docs/强刷ME激活vPro-AMT.md](docs/强刷ME激活vPro-AMT.md) | 完整实战：原理、FIT 操作、避坑清单、平台可行性 |
-| [docs/SOP-AMT开启.md](docs/SOP-AMT开启.md) | 现场检查单，照着一步步做 |
+**这是本仓库最有价值的部分，也是最容易踩的坑。**
+
+在 FIT 里把 `ME Binary File` 指向干净 RGN 的那一刻，FIT 会把整棵配置树**重置成 Intel 默认值**，不再继承 Dell 的定制。
+
+我们拿同一台机器做了逐项对比（原厂 `full.bin` 的配置快照 vs 换 RGN 后构建出的镜像），**426 项里有 35 项被改**：
+
+| 被改的项 | 原厂 | RGN 默认 | 后果 |
+|---|---|---|---|
+| `PttSupported` | **Yes** | **No** | **fTPM 失效，开机报 `TPM could not be initialized`** |
+| `SataPCIeComboPort2` | **SATA** | **PCIe** | 接在这个口的硬盘消失 |
+| `HdaVoltSelect` | **3.3V** | **1.8V** | 声卡供电不对，可能没声音 |
+| `ClkoutSRC0/5/6/7/12/13/14/15` | Disabled | **Enabled** | 8 路时钟输出被凭空打开 |
+| `FwUpdateOemId` | Dell 的 GUID | 全 0 | OEM ID 丢失 |
+| `ProfileChangeable` | true | false | BIOS 里改不了 boot profile |
+| `NvarPostManUnLckd` | No | Yes | 生产后 NVAR 可改，安全变松 |
+
+> **关键认知：「换 RGN 后左边树冒出 AMT 节点」不是成功标志，而是整棵树被替换的信号。**
+> 正确做法是先从原厂 dump 导出一份配置快照，换区后逐项对照，而不是只看 AMT 一项。
+
+修复文件在 [`policy/fixed.xml`](policy/README.md)：以原厂快照为基底，只改 6 项 AMT，其余 420 项全部保留 Dell 原值。用它构建出的 ME 区，与错版的差异只有 **0.09%**（纯配置，代码一个模块没动）。
 
 ---
 
 ## 仓库结构
 
 ```
-README.md                 本文件
+README.md
 docs/
-  强刷ME激活vPro-AMT.md    实战长文
-  SOP-AMT开启.md          操作规范
-  images/                文中配图的本地备份
-uefi-shell/              目标机侧（拷到 FAT32 U 盘根目录）
-  startup.nsh            进 Shell 自动打印文件系统 + 区域表
-  dump.nsh               一键导出 full.bin + me.bin
-  write.nsh              一键写入：备份 → 写 ME → 回读
-  说明.txt               U 盘怎么放、Ventoy 为什么不行
+  强刷ME激活vPro-AMT.md    完整实战：原理 / FIT 操作 / 避坑 / 平台可行性
+  SOP-AMT开启.md           现场检查单
+policy/
+  fixed.xml                FIT 项目快照：原厂配置 + 仅 6 项 AMT 改动
+  README.md                配置漂移清单 + fixed.xml 用法
+firmware/
+  me_amt.bin               预置 ME 区域镜像（5070 / BIOS 1.35.0 可直接刷）
+  README.md                适用条件、风险、怎么用
+uefi-shell/                目标机侧（拷到 FAT32 U 盘根目录）
+  startup.nsh              进 Shell 自动打印文件系统 + 区域表
+  dump.nsh                 一键导出 full.bin + me.bin
+  write.nsh                一键写入：备份 → 写 ME → 回读
+  说明.txt                 U 盘怎么放、Ventoy 为什么不行
 tools/
-  spi_region.py          Flash Descriptor 解析 / 按区裁剪 / 逐区比对
-02_make_me.bat            台外 Windows：裁 ME 区 + 四道校验
-_lib.cmd / config.cmd     02_make_me.bat 的依赖
+  spi_region.py            Flash Descriptor 解析 / 按区裁剪 / 逐区比对
+02_make_me.bat             台外 Windows：裁 ME 区 + 四道强制校验
+_lib.cmd / config.cmd      上面那个的依赖
 ```
 
 ---
@@ -71,14 +70,14 @@ _lib.cmd / config.cmd     02_make_me.bat 的依赖
 
 ```
 ① 目标机  dump.nsh                    → full.bin + me.bin
-② 台外    FIT 换 RGN 并 Build         → outimage.bin
+② 台外    FIT 打开 full.bin，换 RGN    → outimage.bin
           02_make_me.bat fit-output    → me_amt.bin
 ③ 目标机  write.nsh                   → 写入 + 回读
 ```
 
 U 盘准备：**整盘格 FAT32**（不必可引导），把 `uefi-shell/` 全部内容拷到根目录，形成 `\EFI\BOOT\BOOTX64.EFI` + `fpt.efi` + 三个 `.nsh`。F12 选 `UEFI: <U盘>` 直接进 Shell。
 
-详细步骤见文档，尤其是 §4「准备：一个 FAT32 U 盘」。
+详细步骤见 [docs/强刷ME激活vPro-AMT.md](docs/强刷ME激活vPro-AMT.md)，尤其是 §4「准备：一个 FAT32 U 盘」。
 
 ---
 
@@ -95,11 +94,24 @@ U 盘准备：**整盘格 FAT32**（不必可引导），把 `uefi-shell/` 全�
 
 ---
 
+## 预置镜像 vs 自己生成
+
+| | 直接刷 `firmware/me_amt.bin` | 自己走完整流程 |
+|---|---|---|
+| 适用 | 5070 + BIOS 1.35.0，ME 区长度 `0xFFD000` | 任何同代 Q 系列机型 |
+| 前提 | `fpt.efi -i` 确认长度一致 | 先导出自己的 `full.bin` |
+| 风险 | 机型/BIOS 不符时配置可能不匹配 | 全流程可控，配置来自本机 |
+| 耗时 | 10 分钟 | 40 分钟/台 |
+
+**批量部署同型号机器时用前者，其他情况用后者。** 每台机器都必须单独留自己的 `me_before.bin`——别人的备份救不了这台。
+
+---
+
 ## 需要的固件与工具
 
-本仓库**不包含**二进制文件，全部按官方渠道自行获取：
+本仓库只提供**预置的 ME 区域镜像**（`firmware/me_amt.bin`），不含 FPT / FIT / MEA 等 Intel 工具，按官方渠道自行获取：
 
-- **FPT / FIT / MEInfo**：Intel CSME System Tools v12 r36（版本要与 ME 大版本一致）
+- **FPT / FIT**：Intel CSME System Tools v12 r36（版本要与 ME 大版本一致）
 - **干净 RGN**：`12.0.68.1606_COR_H_BA_PRD_RGN.bin`，来自 win-raid 社区固件库或 Internet Archive 的 CSME 全量归档
 - **MEA**：[platomav/MEAnalyzer](https://github.com/platomav/MEAnalyzer)
 - **UEFI Shell**：EDK2 `ShellBinPkg`
@@ -111,12 +123,13 @@ U 盘准备：**整盘格 FAT32**（不必可引导），把 `uefi-shell/` 全�
 ## 风险
 
 - **只写 ME 区**，BIOS / GbE / 描述符不落盘，不会走到整片刷坏那条路；
-- 写入前会自动备份 `me_before.bin`，出问题用 `fpt.efi -f me_before.bin -me` 刷回；
-- 拆机装服务跳线会影响保修，企业环境请确认合规后再操作；
-- 每台机器都要单独留自己的 `me_before.bin`——别人的备份救不了这台。
+- 写入前自动备份 `me_before.bin`，出问题用 `fpt.efi -f me_before.bin -me` 刷回；
+- **开了 BitLocker 的机器**，换 ME 会让 TPM 状态丢失，下次启动要求 48 位恢复密钥，动手前先备份；
+- **BIOS 更新会覆盖 ME**（更新包带 ME 载荷），顺序永远是先升 BIOS、后改 ME；
+- 拆机装服务跳线会影响保修，企业环境请确认合规后再操作。
 
 ---
 
 ## 说明
 
-ME 固件、FPT、FIT 的版权归 Intel。本仓库只记录方法与自写脚本，不含任何 Intel 二进制或固件镜像。
+ME 固件、FPT、FIT 的版权归 Intel。`firmware/me_amt.bin` 是本站机器构建出的区域镜像，仅作技术记录与同型号机器的部署便利；其他 Intel 二进制未包含在本仓库中。
