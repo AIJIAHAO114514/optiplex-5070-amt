@@ -7,6 +7,8 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.txt text eol=crlf
+# FIT 导出的项目文件：保持 CRLF，与 Intel 原始导出一致
+*.xml text eol=crlf
 
 # 文档与代码：LF
 *.md  text eol=lf
