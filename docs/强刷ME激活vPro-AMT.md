@@ -301,6 +301,16 @@ HD Audio 电压、时钟输出开关……丢了就只能靠猜。
 
 ## 6. 第二步：FIT 里换 RGN（核心步骤）
 
+> **可以跳过这一章吗？**
+>
+> 如果机器是 **OptiPlex 5070 + BIOS 1.35.0**，并且 Shell 里
+> `fpt.efi -me -d me_now.bin` 出来的文件正好是 **16,764,928 字节**（`0xFFD000`），
+> 说明 ME 区长度和本仓库的预置镜像一致，可以直接取 `firmware/me_amt.bin` 跳过 §6、§7，
+> 从 §8 开始刷。
+>
+> 其他机型或 BIOS 版本请走完这一章。配置不匹配的镜像刷进去，轻则 TPM 报错、掉盘，
+> 重则开不了机。
+
 ### 6.1 三步操作
 
 1. 把 `fit.exe` 解到**路径没有空格**的目录下（FIT 的老毛病），打开。
@@ -472,6 +482,8 @@ Build → Build Image → 弹 Boot Guard FVME 确认框 → Yes
 
 ## 7. 第三步：裁出 me_amt.bin 并校验
 
+> 用预置镜像的，`me_amt.bin` 已经在手上了，跳过本章的裁剪步骤，直接看 §8。
+
 ```
 02_make_me.bat fit-output   →  拖入 outimage.bin，再拖入原始 full.bin
 ```
@@ -502,7 +514,8 @@ Build → Build Image → 弹 Boot Guard FVME 确认框 → Yes
 
 ## 8. 第四步：写入（只写 ME 区）
 
-回到 UEFI Shell，跑 `write.nsh`，三步：
+回到 UEFI Shell，确认 `me_amt.bin` 在当前目录（U 盘根目录）——用预置镜像的就是从仓库拷来的那个，
+自己生成的就是 §7 裁出来的那个。然后跑 `write.nsh`，三步：
 
 ```
 fpt.efi -me -d me_before.bin      ← 刷前备份，这台机的回滚点

@@ -94,16 +94,64 @@ U 盘准备：**整盘格 FAT32**（不必可引导），把 `uefi-shell/` 全�
 
 ---
 
-## 预置镜像 vs 自己生成
+## 直接使用预置镜像（推荐，适用于同型号批量）
 
-| | 直接刷 `firmware/me_amt.bin` | 自己走完整流程 |
+[`firmware/me_amt.bin`](firmware/README.md) 是一块**已经构建好的完整 ME 区域镜像**，
+可以跳过 FIT 整章直接刷。
+
+```
+16,764,928 字节（0xFFD000）
+SHA256  0894af9ce8f97ea0bbc97cb2d34ec0040ffa6670926ce574540e14698cbdb613
+```
+
+### 适用条件（三条缺一不可）
+
+| 条件 | 要求 | 怎么查 |
 |---|---|---|
-| 适用 | 5070 + BIOS 1.35.0，ME 区长度 `0xFFD000` | 任何同代 Q 系列机型 |
-| 前提 | `fpt.efi -i` 确认长度一致 | 先导出自己的 `full.bin` |
-| 风险 | 机型/BIOS 不符时配置可能不匹配 | 全流程可控，配置来自本机 |
-| 耗时 | 10 分钟 | 40 分钟/台 |
+| **机型** | Dell OptiPlex **5070**（实测 MT；SFF / Micro 未验证） | 机箱标签，或 `wmic csproduct get name` |
+| **BIOS 版本** | **1.35.0** | 开机 F2 首页；或 `wmic bios get smbiosbiosversion`；Linux 用 `dmidecode -s bios-version` |
+| **ME 区域长度** | **16,764,928 字节**（`0xFFD000`） | Shell 里 `fpt.efi -me -d me_now.bin`，看文件大小 |
 
-**批量部署同型号机器时用前者，其他情况用后者。** 每台机器都必须单独留自己的 `me_before.bin`——别人的备份救不了这台。
+**BIOS 版本是最关键的一条。** 这个镜像是从 1.35.0 的机器上导出的，它的 ME 区域是
+`0x3000 ~ 0xFFFFFF`。换成更早的 BIOS（1.2x / 1.3.0），区域大小可能不同，写不进去。
+
+### 刷写步骤
+
+1. U 盘：**整盘 FAT32**（不必可引导），把 `uefi-shell/` 里所有内容拷到根目录
+2. 再把 `firmware/me_amt.bin` 拷到根目录，**文件名保持 `me_amt.bin`**
+3. 目标机：断电 → 拔电源线 → 装服务跳线 → 上电
+4. F12 → `UEFI: <U盘>` → 进 Shell
+5. 跑 `write.nsh`（自动三步：备份 `me_before.bin` → 写 ME → 回读 `me_after.bin`）
+6. 断电 → 拔电源线 → **取下跳线** → 上电
+7. F2 → Security → TPM → **Clear TPM** → F10 保存重启
+
+第 7 步不能省。换 ME 会让 fTPM 里的密钥全部失效，不清一次 TPM，开机还会报
+`TPM could not be initialized`。
+
+### 刷完怎么确认
+
+```
+me_after.bin 的 SHA256  ==  0894af9ce8f97ea0bbc97cb2d34ec0040ffa6670926ce574540e14698cbdb613
+```
+
+FPT 打印 `successful` 不算数，回读的哈希对上才算。
+
+### 版本不符会怎样
+
+| 情况 | 结果 |
+|---|---|
+| BIOS 版本不同、ME 区长度不同 | `fpt -me -f` **拒绝写入**，不会写坏 |
+| 长度碰巧相同但机型不同 | 可能开不了机，用 `me_before.bin` 刷回 |
+
+**每台机器刷之前都会自动 dump 一份 `me_before.bin`**，那是唯一的回滚依据，别删、别覆盖。
+
+### 什么时候不要用预置镜像
+
+- 机型不是 5070（7070 / 7050 / 其他 Q 系列都不行，配置不通用）
+- BIOS 不是 1.35.0，且不打算升级
+- `fpt.efi -i` 显示 CSME 区不是 `0x3000 ~ 0xFFFFFF`
+
+这三种情况走下面的完整流程，用自己机器的 `full.bin` 生成。
 
 ---
 
